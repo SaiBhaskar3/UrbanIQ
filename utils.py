@@ -151,13 +151,36 @@ def get_price_data_for_city(city: str, state: str, df_price: pd.DataFrame):
         "price_timeseries": df
     }
 
-def semantic_retrieve_rexus(query: str, df: pd.DataFrame, top_k: int = 5):
+def get_real_estate_data(city: str, state: str, df_rexus: pd.DataFrame):
     """
-    Placeholder for semantic retrieval function.
-    Returns top_k rows from df containing the query (simple string match).
+    Placeholder for building registry retrieval.
+    Returns first matching row from df_rexus or empty dict.
+    """
+    if df_rexus is None or df_rexus.empty:
+        return {}
+
+    mask_city = df_rexus["Bldg City"].str.strip().str.upper() == city.strip().upper()
+    mask_state = df_rexus["Bldg State"].str.strip().str.upper() == state.strip().upper()
+    matches = df_rexus[mask_city & mask_state]
+
+    if matches.empty:
+        matches = df_rexus[mask_city]
+        if matches.empty:
+            return df_rexus.iloc[0].to_dict()
+    return matches.iloc[0].to_dict()
+
+def semantic_retrieve_rexus(query: str, df: pd.DataFrame, embeddings=None, model=None, top_k: int = 5):
+    """
+    Placeholder for semantic search.
+    If embeddings/model not provided, fallback to simple string match.
     """
     if df is None or query is None:
         return pd.DataFrame()
-    
+
+    if embeddings is not None and model is not None:
+        # Implement proper embedding similarity here if needed
+        return df.head(top_k)
+
+    # Fallback: simple string search
     mask = df.apply(lambda row: row.astype(str).str.contains(query, case=False).any(), axis=1)
     return df[mask].head(top_k)
