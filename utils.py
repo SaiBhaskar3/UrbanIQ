@@ -227,7 +227,7 @@ def _parse_timeseries_from_row(row: pd.Series, date_cols: List[str]) -> pd.Serie
 
 def get_price_data_for_city(city: str, state: str, df_price: Optional[pd.DataFrame]) -> dict:
     """
-    Returns:
+    Returns city-level price info:
       - latest_price: last available non-NaN value (string)
       - median_price: median of the timeseries (string)
       - price_timeseries: pd.Series indexed by datetime (or numeric index) with floats
@@ -238,24 +238,35 @@ def get_price_data_for_city(city: str, state: str, df_price: Optional[pd.DataFra
     df = df_price.copy()
     df.columns = [str(c).strip() for c in df.columns]
 
+    # Identify date columns once
     date_cols = _identify_date_columns(df)
 
-    # Candidate matching columns for City and State
-    city_cols = [
-        c for c in df.columns
-        if "city" in c.lower() or c.lower() in ("place", "city name", "city_name", "city code", "citycode")
-    ]
-    state_cols = [
-        c for c in df.columns
-        if "state" in c.lower() or c.lower() in ("st", "state_code")
-    ]
+    # --- 1) Robust city/state column detection ---
+    lower_map = {c.lower(): c for c in df.columns}
 
-    city_col = city_cols[0] if city_cols else None
-    state_col = state_cols[0] if state_cols else None
+    # Prefer exact 'City' / 'City Name' instead of 'City Code'
+    city_col = None
+    for name in ("city", "city name", "city_name"):
+        if name in lower_map:
+            city_col = lower_map[name]
+            break
+    if city_col is None:
+        city_candidates = [c for c in df.columns if "city" in c.lower()]
+        city_col = city_candidates[0] if city_candidates else None
 
+    # Prefer exact 'State' / 'ST'
+    state_col = None
+    for name in ("state", "st", "state_code"):
+        if name in lower_map:
+            state_col = lower_map[name]
+            break
+    if state_col is None:
+        state_candidates = [c for c in df.columns if "state" in c.lower()]
+        state_col = state_candidates[0] if state_candidates else None
+
+    # --- 2) Build masks and match row ---
     mask_city = False
     mask_state = False
-
     try:
         if city_col:
             mask_city = (
@@ -279,15 +290,17 @@ def get_price_data_for_city(city: str, state: str, df_price: Optional[pd.DataFra
         mask_city = False
         mask_state = False
 
+    # Exact city+state
     if isinstance(mask_city, (pd.Series, np.ndarray)) and isinstance(mask_state, (pd.Series, np.ndarray)):
         matches = df[mask_city & mask_state]
     else:
         matches = pd.DataFrame()
 
-    # Relax matching step by step if needed
+    # Fallback: match only city
     if matches.empty and isinstance(mask_city, (pd.Series, np.ndarray)):
         matches = df[mask_city]
 
+    # Fallback: substring on city
     if matches.empty and city and city_col:
         try:
             matches = df[
@@ -300,6 +313,7 @@ def get_price_data_for_city(city: str, state: str, df_price: Optional[pd.DataFra
         except Exception:
             matches = pd.DataFrame()
 
+    # Final fallback: first row if nothing matches at all
     if matches.empty:
         if df.shape[0] == 0:
             return {"latest_price": "No data", "median_price": "No data", "price_timeseries": None}
@@ -307,7 +321,11 @@ def get_price_data_for_city(city: str, state: str, df_price: Optional[pd.DataFra
     else:
         row = matches.iloc[0]
 
-    ts = _parse_timeseries_from_row(row, date_cols)
+    # --- 3) Build time series for this row ---
+    if date_cols:
+        ts = _parse_timeseries_from_row(row, date_cols)
+    else:
+        ts = pd.Series(dtype=float)
 
     latest_val = None
     median_val = None
@@ -317,17 +335,17 @@ def get_price_data_for_city(city: str, state: str, df_price: Optional[pd.DataFra
         latest_val = ts.iloc[-1]
         median_val = float(ts.median(skipna=True)) if not ts.empty else None
     else:
-        # Fallback to explicit columns
+        # Fallback to explicit columns if timeseries fails
         latest_val = (
-            row.get("Latest Price")
-            or row.get("LatestPrice")
-            or row.get("Latest_Price")
-            or None
+            row.get("Latest Price") or
+            row.get("LatestPrice") or
+            row.get("Latest_Price") or
+            None
         )
         median_val = (
-            row.get("Median Price")
-            or row.get("MedianPrice")
-            or None
+            row.get("Median Price") or
+            row.get("MedianPrice") or
+            None
         )
         if latest_val is not None:
             try:
@@ -335,20 +353,17 @@ def get_price_data_for_city(city: str, state: str, df_price: Optional[pd.DataFra
             except Exception:
                 pass
 
-    latest_str = (
-        f"{latest_val:.2f}"
-        if isinstance(latest_val, (int, float, np.floating))
-        else (str(latest_val) if latest_val is not None else "No data")
-    )
-    median_str = (
-        f"{median_val:.2f}"
-        if isinstance(median_val, (int, float, np.floating))
-        else (str(median_val) if median_val is not None else "No data")
-    )
+    # --- 4) Safe numeric formatting (handles numpy types too) ---
+    def fmt(v):
+        return (
+            f"{v:.2f}"
+            if isinstance(v, (int, float, np.number))
+            else (str(v) if v is not None else "No data")
+        )
 
     return {
-        "latest_price": latest_str,
-        "median_price": median_str,
+        "latest_price": fmt(latest_val),
+        "median_price": fmt(median_val),
         "price_timeseries": ts,
     }
 
