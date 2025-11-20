@@ -2,11 +2,12 @@ import os
 import numpy as np
 import pandas as pd
 
-def safe_float(x, default=np.nan):
+def safe_float(x, default=float("nan")):
     try:
         return float(str(x).replace(",", "").replace("%", ""))
     except Exception:
         return default
+
 
 def sanitize_location_text(location: str):
     """Return (city, state) parsed from 'City, ST'."""
@@ -17,8 +18,9 @@ def sanitize_location_text(location: str):
         return parts[0], parts[1]
     return parts[0], ""
 
+
 def load_csv_safe(path: str):
-    """Load CSV safely with dtype=str."""
+    """Load CSV safely with dtype=str, return None if not found."""
     if not os.path.exists(path):
         return None
     try:
@@ -26,15 +28,28 @@ def load_csv_safe(path: str):
     except Exception:
         return None
 
-def get_safety_data(city: str, state: str):
+def geocode_city_state(city: str, state: str):
+    demo_coords = {
+        ("Seattle", "WA"): (47.6062, -122.3321),
+        ("Portland", "OR"): (45.5122, -122.6587),
+        ("San Francisco", "CA"): (37.7749, -122.4194),
+        ("New York", "NY"): (40.7128, -74.0060),
+        ("Boston", "MA"): (42.3601, -71.0589),
+        ("Chicago", "IL"): (41.8781, -87.6298),
+        ("Austin", "TX"): (30.2672, -97.7431),
+        ("Denver", "CO"): (39.7392, -104.9903)
+    }
+    return demo_coords.get((city, state), (None, None))
+
+def get_safety_data(city: str, state: str = ""):
     """
-    New advanced safety model for UrbanIQ.
-    Produces safety score, trend, severity level, and realistic rates.
+    Enhanced safety model for UrbanIQ:
+    returns crime_index (higher = safer), severity label, violent & property rates,
+    trend, police_response and neighborhood_watch estimate.
     """
-    city = city.lower()
+    city_key = (city or "").strip().lower()
 
     BASE_SAFE_SCORE = 72
-
     CITY_CRIME_PROFILE = {
         "seattle":      {"violent": 5.1, "property": 55.0, "adj": +3},
         "portland":     {"violent": 5.2, "property": 63.0, "adj": -2},
@@ -48,7 +63,7 @@ def get_safety_data(city: str, state: str):
     }
 
     default_profile = {"violent": 4.5, "property": 30.0, "adj": 0}
-    profile = CITY_CRIME_PROFILE.get(city, default_profile)
+    profile = CITY_CRIME_PROFILE.get(city_key, default_profile)
 
     violent_score = max(0, 100 - (profile["violent"] * 7))
     property_score = max(0, 100 - (profile["property"] * 1.2))
@@ -61,6 +76,7 @@ def get_safety_data(city: str, state: str):
     total_safety = max(1, min(95, total_safety + profile["adj"]))
 
     trend = round((profile["violent"] - 4.0) * 3, 1)
+    trend_str = (f"+{trend}%" if trend >= 0 else f"{trend}%") + " YoY"
 
     if total_safety > 80:
         severity = "Very Safe"
@@ -78,7 +94,7 @@ def get_safety_data(city: str, state: str):
         "severity": severity,
         "violent_crime_rate": f"{profile['violent']} per 1,000",
         "property_crime_rate": f"{profile['property']} per 1,000",
-        "crime_trend": f"{trend}% YoY",
+        "crime_trend": trend_str,
         "police_response": f"{8 + int(profile['violent'])} min avg",
         "neighborhood_watch": f"{int(total_safety/2)} groups"
     }
@@ -111,22 +127,78 @@ def get_quality_data(lat: float, lon: float):
 
 def get_education(city: str):
     return {
-        "district_name": f"{city} School District",
-        "highest_ranked_school": f"{city} High School",
+        "district_name": f"{city} School District" if city else "Local School District",
+        "highest_ranked_school": f"{city} High School" if city else "Local High School",
         "school_rank": "#12",
         "school_rating": "8.2/10",
         "total_schools": "35"
     }
 
-def geocode_city_state(city: str, state: str):
-    demo_coords = {
-        ("Seattle", "WA"): (47.6062, -122.3321),
-        ("Portland", "OR"): (45.5122, -122.6587),
-        ("San Francisco", "CA"): (37.7749, -122.4194),
-        ("New York", "NY"): (40.7128, -74.0060),
-        ("Boston", "MA"): (42.3601, -71.0589),
-        ("Chicago", "IL"): (41.8781, -87.6298),
-        ("Austin", "TX"): (30.2672, -97.7431),
-        ("Denver", "CO"): (39.7392, -104.9903)
-    }
-    return demo_coords.get((city, state), (None, None))
+def get_price_data_for_city(city: str, state: str, df_price: pd.DataFrame):
+    """
+    Matches by City and State (case-insensitive).
+    Returns a dict with:
+      - latest_price
+      - median_price (if column exists)
+      - price_timeseries: pandas Series of monthly values (float) indexed by date-string
+    """
+    if df_price is None:
+        return {"latest_price": "No data", "median_price": "No data", "price_timeseries": None}
+
+    df = df_price.copy()
+    mask_city = df["City"].str.strip().str.lower() == city.strip().lower()
+    mask_state = df["State"].str.strip().str.lower() == state.strip().lower()
+    matches = df[mask_city & mask_state]
+
+    if matches.empty:
+        matches = df[mask_city]
+        if matches.empty:
+            row = df.iloc[0]
+        else:
+            row = matches.iloc[0]
+    else:
+        row = matches.iloc[0]
+
+    timeseries = {}
+    for col in df.columns:
+        if col in static_cols:
+            continue
+        val = row.get(col, None)
+        if val is None or pd.isna(val):
+            continue
+        try:
+            f = float(str(val).replace(",", "").strip())
+            timeseries[col] = f
+        except Exception:
+            continue
+
+    if not timeseries:
+        for cand in ["AvgPrice", "AveragePrice", "MedianPrice", "median_price", "avg_price"]:
+            if cand in df.columns:
+                try:
+                    val = float(str(row[cand]).replace(",", ""))
+                    return {"latest_price": val, "median_price": val, "price_timeseries": pd.Series({cand: val})}
+                except Exception:
+                    continue
+        return {"latest_price": "No data", "median_price": "No data", "price_timeseries": None}
+
+    sorted_items = sorted(timeseries.items(), key=lambda x: x[0])
+    series = pd.Series({k: v for k, v in sorted_items})
+    latest_col = series.index[-1]
+    latest_price = float(series.iloc[-1])
+
+    median_price = float(series.median())
+
+    return {"latest_price": latest_price, "median_price": median_price, "price_timeseries": series}
+
+def semantic_retrieve_rexus(user_question: str, df_rexus: pd.DataFrame, embeddings, model, top_k: int = 3):
+    """
+    Given precomputed embeddings (numpy array) and a model,
+    encode the user_question and compute cosine similarity to pick top_k rows.
+    """
+    if df_rexus is None or embeddings is None or model is None or not user_question:
+        return pd.DataFrame()
+    q_emb = model.encode([user_question])
+    sims = np.dot(embeddings, q_emb.T).squeeze()
+    top_idx = sims.argsort()[-top_k:][::-1]
+    return df_rexus.iloc[top_idx]
