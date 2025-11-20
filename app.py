@@ -33,7 +33,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ---------- Cached Data Loading ----------
 
 @st.cache_data(show_spinner=False)
 def load_rexus():
@@ -46,7 +45,6 @@ def load_price():
 df_rexus = load_rexus()
 df_price = load_price()
 
-# ---------- Embedding Model + Cached Embeddings ----------
 
 try:
     from sentence_transformers import SentenceTransformer
@@ -88,9 +86,6 @@ def build_rexus_embeddings():
 emb_model = load_embedding_model()
 rexus_embeddings = build_rexus_embeddings()
 
-
-# ---------- Sidebar ----------
-
 st.sidebar.title("UrbanIQ Navigation")
 page = st.sidebar.selectbox("Go to:", ["Compare", "Data Explorer"])
 
@@ -113,8 +108,6 @@ st.markdown(
     "<p style='text-align:center;color:#6b7280;'>Compare two locations across education, housing, safety and quality-of-life.</p>",
     unsafe_allow_html=True,
 )
-
-# ---------- Compare Page ----------
 
 if page == "Compare":
     st.header("🏙️ UrbanIQ – Compare Two US Locations")
@@ -175,13 +168,11 @@ if page == "Compare":
                 st.error("Something went wrong while loading comparison data.")
                 st.exception(e)
 
-    # Only render comparison if both sides are ready
     if st.session_state.data1 and st.session_state.data2:
         st.markdown(
             f"**Last Updated:** {datetime.now().strftime('%B %d, %Y %I:%M %p')}"
         )
 
-        # ---------- Real Estate + Price ----------
         st.subheader("🏠 Real Estate & Price Snapshot")
         colA, colB = st.columns(2)
 
@@ -221,7 +212,6 @@ if page == "Compare":
         with colB:
             property_card(st.session_state.data2, loc2)
 
-        # ---------- Price Time Series Chart ----------
         p1 = st.session_state.data1["price"].get("price_timeseries")
         p2 = st.session_state.data2["price"].get("price_timeseries")
 
@@ -272,7 +262,6 @@ if page == "Compare":
                 "No city-level time series price data available for either location."
             )
 
-        # ---------- Safety ----------
         st.subheader("🚓 Safety Comparison")
         safety_df = pd.DataFrame(
             [
@@ -307,7 +296,6 @@ if page == "Compare":
             st.markdown(f"**{loc2} Trend:** {s2['crime_trend']}")
             st.markdown(f"Severity: {s2['severity']}")
 
-        # ---------- Quality of Life Radar ----------
         st.subheader("🌿 Quality of Life Radar Chart")
 
         def quality_df(row, label):
@@ -356,7 +344,6 @@ if page == "Compare":
         )
         st.plotly_chart(fig_radar, use_container_width=True)
 
-        # ---------- Education ----------
         st.subheader("📚 Education & Schools")
         col_e1, col_e2 = st.columns(2)
         with col_e1:
@@ -369,8 +356,6 @@ if page == "Compare":
             st.markdown(f"**{loc2}**")
             for k, v in ed.items():
                 st.write(f"{k.replace('_',' ').title()}: {v}")
-
-# ---------- Data Explorer Page ----------
 
 elif page == "Data Explorer":
     st.header("🔎 Data Explorer")
