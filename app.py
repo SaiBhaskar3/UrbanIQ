@@ -92,7 +92,7 @@ rexus_embeddings = build_rexus_embeddings()
 # ---------- Sidebar ----------
 
 st.sidebar.title("UrbanIQ Navigation")
-page = st.sidebar.selectbox("Go to:", ["Compare", "Data Explorer", "Settings"])
+page = st.sidebar.selectbox("Go to:", ["Compare", "Data Explorer"])
 
 with st.sidebar.form("location_form", clear_on_submit=False):
     loc1 = st.text_input("Location A", value="Seattle, WA")
@@ -398,26 +398,3 @@ elif page == "Data Explorer":
         st.info(
             "Upload 'data_gov_bldg_rexus.csv' in app root to explore building data."
         )
-
-# ---------- Settings Page ----------
-
-elif page == "Settings":
-    st.header("⚙️ Settings & Diagnostics")
-    st.info("UrbanIQ demo mode — add API keys for real data for Census/WAQI/Zillow/FBI")
-
-    st.markdown("### Data files detected:")
-    st.write("data_gov_bldg_rexus.csv:", "FOUND" if df_rexus is not None else "NOT FOUND")
-    st.write("price.csv:", "FOUND" if df_price is not None else "NOT FOUND")
-
-    if df_price is not None:
-        from utils import _identify_date_columns  # for debug only
-
-        st.markdown("### Price dataset diagnostics")
-        st.write("Shape:", df_price.shape)
-        st.write("Columns:", list(df_price.columns))
-        st.write("Detected date columns:", _identify_date_columns(df_price))
-
-st.markdown("---")
-st.caption(
-    "UrbanIQ — Data-driven neighborhood insights. Replace demo data with real CSVs & API keys for production."
-)
