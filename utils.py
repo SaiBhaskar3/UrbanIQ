@@ -40,7 +40,6 @@ def geocode_city_state(city: str, state: str):
 
 def get_safety_data(city: str, state: str = ""):
     city_key = (city or "").strip().lower()
-
     BASE_SAFE_SCORE = 72
     CITY_CRIME_PROFILE = {
         "seattle":      {"violent": 5.1, "property": 55.0, "adj": +3},
@@ -133,12 +132,8 @@ def get_price_data_for_city(city: str, state: str, df_price: pd.DataFrame):
         return {"latest_price": "No data", "median_price": "No data", "price_timeseries": None}
 
     df = df_price.copy()
-
-    static_cols = ["City", "State"]
-
     mask_city = df["City"].str.strip().str.lower() == city.strip().lower()
     mask_state = df["State"].str.strip().str.lower() == state.strip().lower()
-
     matches = df[mask_city & mask_state]
 
     if matches.empty:
@@ -150,4 +145,19 @@ def get_price_data_for_city(city: str, state: str, df_price: pd.DataFrame):
     else:
         row = matches.iloc[0]
 
-    timeserie
+    return {
+        "latest_price": row.get("LatestPrice", "No data"),
+        "median_price": row.get("MedianPrice", "No data"),
+        "price_timeseries": df
+    }
+
+def semantic_retrieve_rexus(query: str, df: pd.DataFrame, top_k: int = 5):
+    """
+    Placeholder for semantic retrieval function.
+    Returns top_k rows from df containing the query (simple string match).
+    """
+    if df is None or query is None:
+        return pd.DataFrame()
+    
+    mask = df.apply(lambda row: row.astype(str).str.contains(query, case=False).any(), axis=1)
+    return df[mask].head(top_k)
