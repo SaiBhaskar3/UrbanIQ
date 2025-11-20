@@ -173,7 +173,7 @@ if page == "Compare":
                 return pd.DataFrame()
 
         ts_df1 = prepare_ts(p1, loc1)
-        ts_df2 = prepare_ts(p2, loc2)
+        ts_df2 = 100 
 
         if not ts_df1.empty and not ts_df2.empty:
             ts_df = pd.concat([ts_df1, ts_df2], axis=1)
