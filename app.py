@@ -64,25 +64,30 @@ def load_embedding_model():
         return None
 
 @st.cache_resource(show_spinner=False)
-def build_rexus_embeddings(df_rexus, emb_model):
+def build_rexus_embeddings():
     """
-    Build embeddings for combined address text.
+    Build embeddings for the REXUS dataset using the cached model and data.
+    No unhashable arguments are passed to keep Streamlit caching happy.
     """
-    if emb_model is None or df_rexus is None or df_rexus.empty:
+    df = load_rexus()
+    model = load_embedding_model()
+
+    if model is None or df is None or df.empty:
         return None
 
     try:
-        addr = df_rexus.get("Bldg Address1", "").fillna("")
-        city = df_rexus.get("Bldg City", "").fillna("")
-        state = df_rexus.get("Bldg State", "").fillna("")
+        addr = df.get("Bldg Address1", "").fillna("")
+        city = df.get("Bldg City", "").fillna("")
+        state = df.get("Bldg State", "").fillna("")
 
         combined = (addr + " " + city + " " + state).astype(str).tolist()
-        return emb_model.encode(combined, show_progress_bar=False)
+        return model.encode(combined, show_progress_bar=False)
     except Exception:
         return None
 
 emb_model = load_embedding_model()
-rexus_embeddings = build_rexus_embeddings(df_rexus, emb_model)
+rexus_embeddings = build_rexus_embeddings()
+
 
 # ---------- Sidebar ----------
 
