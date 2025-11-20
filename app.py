@@ -94,7 +94,6 @@ with st.sidebar.form("location_form", clear_on_submit=False):
     loc2 = st.text_input("Location B", value="Portland, OR")
     submit_locations = st.form_submit_button("Update")
 
-# Initialize session state
 if "data1" not in st.session_state:
     st.session_state.data1 = None
 if "data2" not in st.session_state:
@@ -124,25 +123,20 @@ if page == "Compare":
                     city1, state1 = sanitize_location_text(loc1)
                     city2, state2 = sanitize_location_text(loc2)
 
-                    # Real estate
                     real1 = get_real_estate_data(city1, state1, df_rexus)
                     real2 = get_real_estate_data(city2, state2, df_rexus)
 
-                    # Safety
                     safety1 = get_safety_data(city1, state1)
                     safety2 = get_safety_data(city2, state2)
 
-                    # Quality (fallback coords if geocode missing)
                     lat1, lon1 = geocode_city_state(city1, state1)
                     lat2, lon2 = geocode_city_state(city2, state2)
                     quality1 = get_quality_data(lat1 or 40.0, lon1 or -100.0)
                     quality2 = get_quality_data(lat2 or 40.0, lon2 or -100.0)
 
-                    # Education
                     edu1 = get_education(city1)
                     edu2 = get_education(city2)
 
-                    # Price
                     price1 = get_price_data_for_city(city1, state1, df_price)
                     price2 = get_price_data_for_city(city2, state2, df_price)
 
@@ -364,7 +358,7 @@ elif page == "Data Explorer":
         st.subheader("Building Dataset (Sample)")
         st.dataframe(df_rexus.head(50))
 
-        query = st.text_input("Search Buildings (Semantic / Text)")
+        query = st.text_input("Search Buildings)")
         k = st.slider("Top K", 1, 10, 3)
 
         if st.button("Search Buildings"):
