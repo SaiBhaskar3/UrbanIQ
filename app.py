@@ -1,189 +1,127 @@
-import os
-import time
-from datetime import datetime
-from typing import Dict, Any, Optional, Tuple, List
-
-import numpy as np
+import streamlit as st
 import pandas as pd
 import plotly.express as px
-import streamlit as st
+from datetime import datetime
 
 from utils import (
-    sanitize_location_text,
     load_csv_safe,
-    init_sentence_model,
+    sanitize_location_text,
     geocode_city_state,
-    get_real_estate_data,
     get_safety_data,
+    get_education,
     get_quality_data,
-    semantic_retrieve_rexus
+    safe_float
 )
 
-st.set_page_config(
-    page_title="UrbanIQ – US Neighborhood Insights",
-    page_icon="🏙️",
-    layout="wide"
+st.set_page_config(page_title="UrbanIQ – City Comparison", layout="wide")
+
+st.sidebar.title("UrbanIQ – Compare Cities")
+
+with st.sidebar.form("loc_form"):
+    loc1 = st.text_input("Location A", "Seattle, WA")
+    loc2 = st.text_input("Location B", "Portland, OR")
+    submit_btn = st.form_submit_button("Compare")
+
+if submit_btn:
+    st.session_state["loc1"] = loc1
+    st.session_state["loc2"] = loc2
+
+if "loc1" not in st.session_state:
+    st.stop()
+
+location1 = st.session_state["loc1"]
+location2 = st.session_state["loc2"]
+
+city1, state1 = sanitize_location_text(location1)
+city2, state2 = sanitize_location_text(location2)
+
+lat1, lon1 = geocode_city_state(city1, state1)
+lat2, lon2 = geocode_city_state(city2, state2)
+
+data1 = {
+    "safety": get_safety_data(city1, state1),
+    "education": get_education(city1),
+    "quality": get_quality_data(lat1 or 40, lon1 or -100)
+}
+
+data2 = {
+    "safety": get_safety_data(city2, state2),
+    "education": get_education(city2),
+    "quality": get_quality_data(lat2 or 40, lon2 or -100)
+}
+
+st.title("🏙️ UrbanIQ — Neighborhood Intelligence Engine")
+st.write(f"Updated: {datetime.now().strftime('%B %d, %Y %I:%M %p')}")
+
+st.subheader("🚓 Crime & Safety Comparison")
+
+crime_df = pd.DataFrame([
+    {"Location": location1, "Score": data1["safety"]["crime_index"]},
+    {"Location": location2, "Score": data2["safety"]["crime_index"]},
+])
+
+fig = px.bar(
+    crime_df,
+    x="Location",
+    y="Score",
+    text="Score",
+    color="Location",
+    title="Safety Score (Higher = Safer)"
 )
+st.plotly_chart(fig, use_container_width=True)
 
-st.markdown("""
-<style>
-.section-title { color:#111827; font-size:1.3rem; font-weight:700; margin: 1rem 0 0.5rem 0; }
-.metric-item { background-color:#fff; padding:0.75rem; border-radius:6px; border:1px solid #e5e7eb; }
-</style>
-""", unsafe_allow_html=True)
+colA, colB = st.columns(2)
 
-df_rexus = load_csv_safe("data_gov_bldg_rexus.csv")
-df_price = load_csv_safe("price.csv")
+with colA:
+    st.markdown(f"### {location1}")
+    st.write("Severity:", data1["safety"]["severity"])
+    st.write("Violent Crime:", data1["safety"]["violent_crime_rate"])
+    st.write("Property Crime:", data1["safety"]["property_crime_rate"])
+    st.write("Trend:", data1["safety"]["crime_trend"])
 
-emb_model = init_sentence_model()
-if emb_model and df_rexus is not None:
-    combined_col = (
-        df_rexus.get("Bldg Address1", "").fillna("") + " " +
-        df_rexus.get("Bldg City", "").fillna("") + " " +
-        df_rexus.get("Bldg State", "").fillna("")
-    )
-    rexus_embeddings = emb_model.encode(list(combined_col), show_progress_bar=False)
-else:
-    rexus_embeddings = None
+with colB:
+    st.markdown(f"### {location2}")
+    st.write("Severity:", data2["safety"]["severity"])
+    st.write("Violent Crime:", data2["safety"]["violent_crime_rate"])
+    st.write("Property Crime:", data2["safety"]["property_crime_rate"])
+    st.write("Trend:", data2["safety"]["crime_trend"])
 
-st.sidebar.title("UrbanIQ Navigation")
-page = st.sidebar.selectbox("Go to:", ["Compare", "Data Explorer", "Settings"])
+st.subheader("✨ Quality of Life Comparison")
 
-with st.sidebar.form("location_form", clear_on_submit=False):
-    loc1 = st.text_input("Location A", value="Seattle, WA")
-    loc2 = st.text_input("Location B", value="Portland, OR")
-    submit_locations = st.form_submit_button("Update")
+def radar_df(data, label):
+    q = data["quality"]
+    vals = {
+        "Walkability": safe_float(q["walkability"]),
+        "Air Quality": safe_float(q["air_quality"]),
+        "Transit": safe_float(q["public_transit"]),
+        "Healthcare": safe_float(q["healthcare_access"]),
+        "Restaurants": safe_float(q["restaurants"]),
+    }
+    df = pd.DataFrame([vals])
+    df["label"] = label
+    return df
 
-if "data1" not in st.session_state:
-    st.session_state.data1 = None
-if "data2" not in st.session_state:
-    st.session_state.data2 = None
+r1 = radar_df(data1, location1)
+r2 = radar_df(data2, location2)
+df_radar = pd.concat([r1, r2], ignore_index=True)
+melted = df_radar.melt(id_vars="label", var_name="metric", value_name="value")
 
-if page == "Compare":
+fig2 = px.line_polar(melted, theta="metric", r="value", color="label", line_close=True)
+st.plotly_chart(fig2, use_container_width=True)
 
-    st.header("🏙️ UrbanIQ – Compare Two US Locations")
+st.subheader("📚 Education Overview")
 
-    left, right = st.columns([1, 3])
-    with left:
-        st.markdown("### Locations Selected")
-        st.write(f"**A:** {loc1}")
-        st.write(f"**B:** {loc2}")
+colE1, colE2 = st.columns(2)
 
-        if st.button("Load & Compare"):
-            with st.spinner("Fetching neighborhood insights..."):
-                city1, state1 = sanitize_location_text(loc1)
-                city2, state2 = sanitize_location_text(loc2)
+with colE1:
+    st.markdown(f"### {location1}")
+    for k, v in data1["education"].items():
+        st.write(f"**{k.replace('_',' ').title()}:** {v}")
 
-                st.session_state.data1 = {
-                    "real_estate": get_real_estate_data(city1, state1, df_rexus),
-                    "safety": get_safety_data(city1),
-                    "quality": get_quality_data(*geocode_city_state(city1, state1))
-                }
+with colE2:
+    st.markdown(f"### {location2}")
+    for k, v in data2["education"].items():
+        st.write(f"**{k.replace('_',' ').title()}:** {v}")
 
-                st.session_state.data2 = {
-                    "real_estate": get_real_estate_data(city2, state2, df_rexus),
-                    "safety": get_safety_data(city2),
-                    "quality": get_quality_data(*geocode_city_state(city2, state2))
-                }
-
-            st.success("Comparison Ready!")
-
-    # RIGHT SIDE CONTENT
-    if st.session_state.data1 and st.session_state.data2:
-        st.markdown(f"**Last Updated:** {datetime.now().strftime('%B %d, %Y %I:%M %p')}")
-
-        # -------------------------------
-        # Real Estate
-        # -------------------------------
-        st.subheader("🏠 Real Estate Overview")
-        colA, colB = st.columns(2)
-
-        def card(data, title):
-            real = data["real_estate"]
-            st.markdown(f"### {title}")
-            st.markdown("<div class='metric-item'>", unsafe_allow_html=True)
-            for k, v in real.items():
-                st.write(f"**{k.replace('_',' ').title()}:** {v}")
-            st.markdown("</div>", unsafe_allow_html=True)
-
-        with colA:
-            card(st.session_state.data1, loc1)
-
-        with colB:
-            card(st.session_state.data2, loc2)
-
-        st.subheader("🚓 Safety Comparison")
-
-        safety_df = pd.DataFrame([
-            {"Location": loc1, "Score": st.session_state.data1["safety"]["crime_index"]},
-            {"Location": loc2, "Score": st.session_state.data2["safety"]["crime_index"]}
-        ])
-
-        fig = px.bar(
-            safety_df,
-            x="Location",
-            y="Score",
-            text="Score",
-            color="Location",
-            labels={"Score": "Safety Score (Higher = Safer)"}
-        )
-        st.plotly_chart(fig, use_container_width=True)
-
-        st.subheader("🌿 Quality of Life Radar Chart")
-
-        def quality_df(row, label):
-            q = row["quality"]
-            return pd.DataFrame({
-                "Metric": ["Walkability", "Air Quality", "Transit", "Healthcare", "Restaurants"],
-                "Value": [q["walkability"], q["air_quality"], q["transit"], q["healthcare"], q["restaurants"]],
-                "Location": label
-            })
-
-        radar_data = pd.concat([
-            quality_df(st.session_state.data1, loc1),
-            quality_df(st.session_state.data2, loc2)
-        ])
-
-        fig_radar = px.line_polar(
-            radar_data,
-            r="Value",
-            theta="Metric",
-            color="Location",
-            line_close=True
-        )
-        st.plotly_chart(fig_radar, use_container_width=True)
-
-elif page == "Data Explorer":
-
-    st.header("🔎 Data Explorer")
-
-    if df_rexus is not None:
-        st.subheader("Building Dataset (First 50 Rows)")
-        st.dataframe(df_rexus.head(50))
-
-        query = st.text_input("Search Buildings (Semantic)")
-        k = st.slider("Top K", 1, 10, 3)
-
-        if st.button("Search"):
-            results = semantic_retrieve_rexus(query, k, df_rexus, emb_model, rexus_embeddings)
-            if results.empty:
-                st.info("No results.")
-            else:
-                st.dataframe(results)
-    else:
-        st.info("Upload data_gov_bldg_rexus.csv to enable Data Explorer.")
-
-elif page == "Settings":
-
-    st.header("⚙️ Settings")
-    st.info("UrbanIQ demo mode — add API keys for real data.")
-
-    st.markdown("""
-    ### Supported APIs (Optional)
-    - Census API  
-    - WAQI Air Quality API  
-    - Zillow Estimator (if token provided)  
-    - FBI Crime Data API  
-
-    Add these to a `.env` file or Streamlit Cloud Secrets.
-    """)
+st.markdown("---")
+st.write("Built with ❤️ by UrbanIQ — Data-Driven City Intelligence")
