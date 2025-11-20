@@ -66,11 +66,9 @@ def get_safety_data(city: str, state: str = ""):
     )
     total_safety = max(1, min(95, total_safety + profile["adj"]))
 
-    # Crime trend simulation
     trend = round((profile["violent"] - 4.0) * 3, 1)
     trend_str = (f"+{trend}%" if trend >= 0 else f"{trend}%") + " YoY"
 
-    # Severity label
     if total_safety > 80:
         severity = "Very Safe"
     elif total_safety > 70:
@@ -145,17 +143,16 @@ def get_price_data_for_city(city: str, state: str, df_price: pd.DataFrame):
     else:
         row = matches.iloc[0]
 
+    # Convert the column with numeric values to float if possible
+    ts = df.iloc[:, 2:].apply(pd.to_numeric, errors='coerce') if df.shape[1] > 2 else pd.Series()
+
     return {
         "latest_price": row.get("LatestPrice", "No data"),
         "median_price": row.get("MedianPrice", "No data"),
-        "price_timeseries": df
+        "price_timeseries": ts
     }
 
 def get_real_estate_data(city: str, state: str, df_rexus: pd.DataFrame):
-    """
-    Placeholder for building registry retrieval.
-    Returns first matching row from df_rexus or empty dict.
-    """
     if df_rexus is None or df_rexus.empty:
         return {}
 
@@ -170,17 +167,12 @@ def get_real_estate_data(city: str, state: str, df_rexus: pd.DataFrame):
     return matches.iloc[0].to_dict()
 
 def semantic_retrieve_rexus(query: str, df: pd.DataFrame, embeddings=None, model=None, top_k: int = 5):
-    """
-    Placeholder for semantic search.
-    If embeddings/model not provided, fallback to simple string match.
-    """
     if df is None or query is None:
         return pd.DataFrame()
 
     if embeddings is not None and model is not None:
-        # Implement proper embedding similarity here if needed
+        # Placeholder: return top_k rows (replace with real semantic similarity)
         return df.head(top_k)
-
-    # Fallback: simple string search
+        
     mask = df.apply(lambda row: row.astype(str).str.contains(query, case=False).any(), axis=1)
     return df[mask].head(top_k)
