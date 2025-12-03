@@ -2,7 +2,6 @@ import streamlit as st
 from datetime import datetime
 import pandas as pd
 import plotly.express as px
-import traceback
 
 from utils import (
     sanitize_location_text,
@@ -10,11 +9,11 @@ from utils import (
     geocode_city_state,
     get_safety_data,
     get_quality_data,
-    get_education,          # keeps earlier district-style fallback
+    get_education,
     get_price_data_for_city,
     get_real_estate_data,
     semantic_retrieve_rexus,
-    get_school_stats        # new helper from utils.py
+    get_school_stats,
 )
 
 st.set_page_config(
@@ -33,7 +32,6 @@ st.markdown(
 """,
     unsafe_allow_html=True,
 )
-
 @st.cache_data(show_spinner=False)
 def load_rexus():
     return load_csv_safe("data_gov_bldg_rexus.csv")
@@ -59,7 +57,6 @@ try:
 except Exception:
     MODEL_AVAILABLE = False
 
-
 @st.cache_resource(show_spinner=False)
 def load_embedding_model():
     if not MODEL_AVAILABLE:
@@ -74,10 +71,8 @@ def load_embedding_model():
 def build_rexus_embeddings():
     df = load_rexus()
     model = load_embedding_model()
-
     if model is None or df is None or df.empty:
         return None
-
     try:
         addr = df.get("Bldg Address1", "").fillna("")
         city = df.get("Bldg City", "").fillna("")
@@ -86,7 +81,6 @@ def build_rexus_embeddings():
         return model.encode(combined, show_progress_bar=False)
     except Exception:
         return None
-
 
 emb_model = load_embedding_model()
 rexus_embeddings = build_rexus_embeddings()
@@ -182,32 +176,21 @@ if page == "Compare":
 
             if re_info:
                 keys_show = [
-                    "Bldg Address1",
-                    "Bldg Status",
-                    "Property Type",
-                    "Bldg ANSI Usable",
-                    "Total Parking Spaces",
-                    "Owned/Leased",
-                    "Construction Date",
-                    "Historical Status",
+                    "Bldg Address1", "Bldg Status", "Property Type", "Bldg ANSI Usable",
+                    "Total Parking Spaces", "Owned/Leased", "Construction Date", "Historical Status",
                 ]
                 for k in keys_show:
-                    # display if exists, else "N/A"
                     st.write(f"**{k.replace('_',' ').title()}:** {re_info.get(k, 'N/A')}")
             else:
                 st.write("**No building registry data available.**")
 
             st.markdown("---")
-
-            # Price info (from month-wise timeseries)
             latest = price_info.get("latest_price", "No data")
             median = price_info.get("median_price", "No data")
             st.write("**Latest Price (city-level):**", latest)
             st.write("**Median Price (city-level):**", median)
 
             st.markdown("---")
-
-            # School info
             st.write("**Number of Schools:**", school_info.get("school_count", "No data"))
             st.write("**Best School Rank:**", school_info.get("best_rank", "No data"))
 
@@ -217,10 +200,8 @@ if page == "Compare":
             property_card(st.session_state.data1, loc1)
         with colB:
             property_card(st.session_state.data2, loc2)
-
-        # Prepare and plot price timeseries (note: utils returns 'timeseries')
-        p1 = st.session_state.data1["price"].get("timeseries")
-        p2 = st.session_state.data2["price"].get("timeseries")
+        p1 = st.session_state.data1["price"].get("price_timeseries")
+        p2 = st.session_state.data2["price"].get("price_timeseries")
 
         def prepare_ts(data, label):
             if data is None:
@@ -260,7 +241,6 @@ if page == "Compare":
                 ts_df = ts_df.sort_index()
             except Exception:
                 pass
-
             fig_price = px.line(ts_df, x=ts_df.index, y=ts_df.columns, markers=True)
             fig_price.update_layout(xaxis_title="Date", yaxis_title="Price")
             st.plotly_chart(fig_price, use_container_width=True)
@@ -274,14 +254,7 @@ if page == "Compare":
                 {"Location": loc2, "Score": st.session_state.data2["safety"]["crime_index"]},
             ]
         )
-        fig_safety = px.bar(
-            safety_df,
-            x="Location",
-            y="Score",
-            text="Score",
-            color="Location",
-            labels={"Score": "Safety Score (Higher = Safer)"},
-        )
+        fig_safety = px.bar(safety_df, x="Location", y="Score", text="Score", color="Location", labels={"Score": "Safety Score (Higher = Safer)"})
         st.plotly_chart(fig_safety, use_container_width=True)
 
         col1_tr, col2_tr = st.columns(2)
@@ -295,10 +268,8 @@ if page == "Compare":
             st.markdown(f"Severity: {s2['severity']}")
 
         st.subheader("🌿 Quality of Life Radar Chart")
-
         def quality_df(row, label):
             q = row.get("quality", {}) or {}
-
             def to_num(x):
                 if isinstance(x, str) and "/" in x:
                     try:
@@ -309,21 +280,17 @@ if page == "Compare":
                     return float(x)
                 except Exception:
                     return 0.0
-
-            return pd.DataFrame(
-                {
-                    "Metric": ["Walkability", "Air Quality", "Transit", "Healthcare", "Restaurants"],
-                    "Value": [
-                        to_num(q.get("walkability")),
-                        to_num(q.get("air_quality")),
-                        to_num(q.get("transit")),
-                        to_num(q.get("healthcare")),
-                        to_num(q.get("restaurants")),
-                    ],
-                    "Location": label,
-                }
-            )
-
+            return pd.DataFrame({
+                "Metric": ["Walkability", "Air Quality", "Transit", "Healthcare", "Restaurants"],
+                "Value": [
+                    to_num(q.get("walkability")),
+                    to_num(q.get("air_quality")),
+                    to_num(q.get("transit")),
+                    to_num(q.get("healthcare")),
+                    to_num(q.get("restaurants")),
+                ],
+                "Location": label,
+            })
         radar_data = pd.concat([quality_df(st.session_state.data1, loc1), quality_df(st.session_state.data2, loc2)])
         fig_radar = px.line_polar(radar_data, r="Value", theta="Metric", color="Location", line_close=True)
         st.plotly_chart(fig_radar, use_container_width=True)
@@ -369,3 +336,4 @@ elif page == "Data Explorer":
                 st.exception(e)
     else:
         st.info("Upload 'data_gov_bldg_rexus.csv' in app root to explore building data.")
+
