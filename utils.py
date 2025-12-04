@@ -1,21 +1,21 @@
 import os
 import re
-from typing import Optional, Tuple, List
-
 import numpy as np
 import pandas as pd
+from typing import Optional, Tuple, List
 
-MONTH_COL_REGEX = re.compile(
-    r"^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[\s\-]?\d{2,4}$",
-    re.IGNORECASE,
-)
 
-NON_TIME_COLS = {
-    "city", "city name", "state", "st", "state_code", "region", "zip", "zipcode", "metro", "county"
-}
+def safe_float(x, default=float("nan")):
+    try:
+        if pd.isna(x):
+            return default
+        return float(str(x).replace(",", "").replace("%", ""))
+    except Exception:
+        return default
 
 
 def sanitize_location_text(location: str) -> Tuple[str, str]:
+    """Return (city, state) parsed from 'City, ST'."""
     if not location:
         return "", ""
     parts = [p.strip() for p in location.split(",")]
@@ -25,8 +25,13 @@ def sanitize_location_text(location: str) -> Tuple[str, str]:
 
 
 def load_csv_safe(path: str) -> Optional[pd.DataFrame]:
+    """
+    Load CSV returning DataFrame or None.
+    Uses low_memory=False to handle wide files and strips column names.
+    """
     if not os.path.exists(path):
         return None
+
     try:
         df = pd.read_csv(path, dtype=str, low_memory=False)
     except Exception:
@@ -34,6 +39,7 @@ def load_csv_safe(path: str) -> Optional[pd.DataFrame]:
             df = pd.read_csv(path, dtype=str, engine="python")
         except Exception:
             return None
+
     df.columns = [str(c).strip() for c in df.columns]
     return df
 
@@ -55,16 +61,17 @@ def geocode_city_state(city: str, state: str) -> Tuple[Optional[float], Optional
 def get_safety_data(city: str, state: str = "") -> dict:
     city_key = (city or "").strip().lower()
     BASE_SAFE_SCORE = 72
+
     CITY_CRIME_PROFILE = {
-        "seattle":      {"violent": 5.1, "property": 55.0, "adj": +3},
-        "portland":     {"violent": 5.2, "property": 63.0, "adj": -2},
-        "new york":     {"violent": 3.1, "property": 23.0, "adj": +5},
-        "san francisco":{"violent": 6.5, "property": 80.0, "adj": -5},
-        "los angeles":  {"violent": 5.9, "property": 54.0, "adj": -3},
-        "chicago":      {"violent": 9.9, "property": 46.0, "adj": -8},
-        "boston":       {"violent": 3.9, "property": 24.0, "adj": +7},
-        "austin":       {"violent": 4.3, "property": 36.0, "adj": +4},
-        "denver":       {"violent": 5.5, "property": 53.0, "adj": +1},
+        "seattle": {"violent": 5.1, "property": 55.0, "adj": +3},
+        "portland": {"violent": 5.2, "property": 63.0, "adj": -2},
+        "new york": {"violent": 3.1, "property": 23.0, "adj": +5},
+        "san francisco": {"violent": 6.5, "property": 80.0, "adj": -5},
+        "los angeles": {"violent": 5.9, "property": 54.0, "adj": -3},
+        "chicago": {"violent": 9.9, "property": 46.0, "adj": -8},
+        "boston": {"violent": 3.9, "property": 24.0, "adj": +7},
+        "austin": {"violent": 4.3, "property": 36.0, "adj": +4},
+        "denver": {"violent": 5.5, "property": 53.0, "adj": +1},
     }
 
     default_profile = {"violent": 4.5, "property": 30.0, "adj": 0}
@@ -101,7 +108,7 @@ def get_safety_data(city: str, state: str = "") -> dict:
         "property_crime_rate": f"{profile['property']} per 1,000",
         "crime_trend": trend_str,
         "police_response": f"{8 + int(profile['violent'])} min avg",
-        "neighborhood_watch": f"{int(total_safety/2)} groups",
+        "neighborhood_watch": f"{int(total_safety / 2)} groups",
     }
 
 
@@ -109,6 +116,7 @@ def get_quality_data(lat: float, lon: float) -> dict:
     try:
         distance_from_coast = abs((lon + 100) / 20)
         urban_density = abs(40 - lat) / 10
+
         base = max(50, min(95, 75 - distance_from_coast + urban_density))
 
         walkability = int(min(100, base * (1 + urban_density / 20)))
@@ -141,45 +149,72 @@ def get_education(city: str) -> dict:
         "school_rating": "8.2/10",
         "total_schools": "35",
     }
-    
+
+
+MONTH_COL_REGEX = re.compile(
+    r"^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[\s\-]?\d{2,4}$",
+    re.IGNORECASE,
+)
+
+NON_TIME_COLS = {
+    "city", "city name", "state", "st", "state_code",
+    "region", "zip", "zipcode", "metro", "county"
+}
+
+
 def _identify_date_columns(df: pd.DataFrame) -> List[str]:
     date_cols = []
+
     for c in df.columns:
         name = str(c).strip()
         lower_name = name.lower()
+
         if lower_name in NON_TIME_COLS:
             continue
+
         if MONTH_COL_REGEX.match(name):
             date_cols.append(c)
             continue
+
         parsed = pd.to_datetime("1 " + name, errors="coerce")
         if pd.notna(parsed):
             date_cols.append(c)
+
     if not date_cols and df.shape[1] > 6:
         date_cols = list(df.columns[6:])
+
     return date_cols
 
 
 def _parse_timeseries_from_row(row: pd.Series, date_cols: List[str]) -> pd.Series:
     if not date_cols:
         return pd.Series(dtype=float)
+
     vals = (
         row.loc[date_cols]
         .replace("", np.nan)
         .map(lambda x: str(x).replace(",", "").strip())
     )
+
     numeric = pd.to_numeric(vals, errors="coerce")
+
     parsed = pd.to_datetime(date_cols, errors="coerce", infer_datetime_format=True)
+
     if parsed.isna().all():
-        parsed = pd.to_datetime(["1 " + c for c in date_cols], errors="coerce", infer_datetime_format=True)
-    if parsed.isna().all():
-        idx = pd.Index(range(len(date_cols)))
-    else:
-        idx = parsed
+        parsed = pd.to_datetime(
+            ["1 " + c for c in date_cols],
+            errors="coerce",
+            infer_datetime_format=True,
+        )
+
+    idx = parsed if not parsed.isna().all() else pd.Index(range(len(date_cols)))
+
     s = pd.Series(data=numeric.values, index=idx).dropna()
     return s
 
+
 def get_price_data_for_city(city: str, state: str, df_price: Optional[pd.DataFrame]) -> dict:
+
     if df_price is None or df_price.empty:
         return {"latest_price": "No data", "median_price": "No data", "price_timeseries": None}
 
@@ -195,6 +230,7 @@ def get_price_data_for_city(city: str, state: str, df_price: Optional[pd.DataFra
         if name in lower_map:
             city_col = lower_map[name]
             break
+
     if city_col is None:
         city_candidates = [c for c in df.columns if "city" in c.lower()]
         city_col = city_candidates[0] if city_candidates else None
@@ -204,22 +240,24 @@ def get_price_data_for_city(city: str, state: str, df_price: Optional[pd.DataFra
         if name in lower_map:
             state_col = lower_map[name]
             break
+
     if state_col is None:
         state_candidates = [c for c in df.columns if "state" in c.lower()]
         state_col = state_candidates[0] if state_candidates else None
 
     mask_city = False
     mask_state = False
+
     try:
         if city_col:
             mask_city = (
-                df[city_col].fillna("").astype(str).str.strip().str.lower()
-                == (city or "").strip().lower()
+                df[city_col].fillna("").astype(str).str.strip().str.lower() ==
+                (city or "").strip().lower()
             )
         if state_col:
             mask_state = (
-                df[state_col].fillna("").astype(str).str.strip().str.lower()
-                == (state or "").strip().lower()
+                df[state_col].fillna("").astype(str).str.strip().str.lower() ==
+                (state or "").strip().lower()
             )
     except Exception:
         mask_city = False
@@ -236,7 +274,9 @@ def get_price_data_for_city(city: str, state: str, df_price: Optional[pd.DataFra
     if matches.empty and city and city_col:
         try:
             matches = df[
-                df[city_col].fillna("").astype(str).str.lower().str.contains(city.strip().lower(), na=False)
+                df[city_col].fillna("").astype(str).str.lower().str.contains(
+                    city.strip().lower(), na=False
+                )
             ]
         except Exception:
             matches = pd.DataFrame()
@@ -259,15 +299,30 @@ def get_price_data_for_city(city: str, state: str, df_price: Optional[pd.DataFra
     if not ts.empty:
         ts = ts.sort_index()
         latest_val = ts.iloc[-1]
-        median_val = float(ts.median(skipna=True)) if not ts.empty else None
+        median_val = float(ts.median(skipna=True))
+
     else:
-        latest_val = None
-        median_val = None
+        latest_val = (
+            row.get("Latest Price") or
+            row.get("LatestPrice") or
+            row.get("Latest_Price") or
+            None
+        )
+        median_val = (
+            row.get("Median Price") or
+            row.get("MedianPrice") or
+            None
+        )
+
+    if latest_val is not None:
+        try:
+            latest_val = float(str(latest_val).replace(",", ""))
+        except Exception:
+            pass
 
     def fmt(v):
         return (
-            f"{v:.2f}"
-            if isinstance(v, (int, float, np.number))
+            f"{v:.2f}" if isinstance(v, (int, float, np.number))
             else (str(v) if v is not None else "No data")
         )
 
@@ -279,6 +334,7 @@ def get_price_data_for_city(city: str, state: str, df_price: Optional[pd.DataFra
 
 
 def get_real_estate_data(city: str, state: str, df_rexus: Optional[pd.DataFrame]) -> dict:
+
     if df_rexus is None or df_rexus.empty:
         return {}
 
@@ -302,13 +358,13 @@ def get_real_estate_data(city: str, state: str, df_rexus: Optional[pd.DataFrame]
     try:
         if city_col:
             mask_city = (
-                df[city_col].fillna("").astype(str).str.strip().str.upper()
-                == city.strip().upper()
+                df[city_col].fillna("").astype(str).str.strip().str.upper() ==
+                city.strip().upper()
             )
         if state_col:
             mask_state = (
-                df[state_col].fillna("").astype(str).str.strip().str.upper()
-                == state.strip().upper()
+                df[state_col].fillna("").astype(str).str.strip().str.upper() ==
+                state.strip().upper()
             )
     except Exception:
         mask_city = False
@@ -325,7 +381,9 @@ def get_real_estate_data(city: str, state: str, df_rexus: Optional[pd.DataFrame]
     if matches.empty and city_col and city:
         try:
             matches = df[
-                df[city_col].fillna("").astype(str).str.upper().str.contains(city.strip().upper(), na=False)
+                df[city_col].fillna("").astype(str).str.upper().str.contains(
+                    city.strip().upper(), na=False
+                )
             ]
         except Exception:
             matches = pd.DataFrame()
@@ -335,36 +393,6 @@ def get_real_estate_data(city: str, state: str, df_rexus: Optional[pd.DataFrame]
 
     return matches.iloc[0].to_dict()
 
-def get_school_stats(city: str, state: str, df_school: Optional[pd.DataFrame]) -> dict:
-    if df_school is None or df_school.empty:
-        return {"school_count": "No data", "best_rank": "No data"}
-
-    df = df_school.copy()
-    df.columns = [str(c).strip() for c in df.columns]
-
-    city_col = next((c for c in df.columns if "city" in c.lower()), None)
-    state_col = next((c for c in df.columns if "state" in c.lower()), None)
-    rank_col = next((c for c in df.columns if "rank" in c.lower()), None)
-
-    if not city_col or not rank_col:
-        return {"school_count": "No data", "best_rank": "No data"}
-
-    mask = (
-        df[city_col].fillna("").str.lower().str.strip() == city.lower().strip()
-    )
-    if state_col:
-        mask &= df[state_col].fillna("").str.lower().str.strip() == state.lower().strip()
-
-    matches = df[mask]
-
-    if matches.empty:
-        return {"school_count": 0, "best_rank": "No data"}
-
-    school_count = matches.shape[0]
-    best_rank = pd.to_numeric(matches[rank_col].replace("", np.nan), errors="coerce").min()
-
-    return {"school_count": int(school_count), "best_rank": int(best_rank) if pd.notna(best_rank) else "No data"}
-
 
 def semantic_retrieve_rexus(
     query: str,
@@ -373,23 +401,27 @@ def semantic_retrieve_rexus(
     model=None,
     top_k: int = 5,
 ) -> pd.DataFrame:
+
     if df is None or df.empty or not query:
         return pd.DataFrame()
 
-    # Use embeddings + model if both are provided
     if embeddings is not None and model is not None:
         try:
+            from numpy.linalg import norm
+
             q_vec = model.encode([query])[0]
             emb = np.asarray(embeddings)
-            # cosine similarity with stable denom
-            sims = emb @ q_vec / (np.linalg.norm(emb, axis=1) * np.linalg.norm(q_vec) + 1e-9)
-            top_idx = np.argsort(-sims)[:top_k]
-            out = df.iloc[top_idx].copy()
-            out["similarity"] = sims[top_idx]
-            return out
-        except Exception:
-            # fall back to substring match below
-            pass
 
-    mask = df.apply(lambda row: row.astype(str).str.contains(query, case=False, na=False).any(), axis=1)
+            sims = emb @ q_vec / (norm(emb, axis=1) * norm(q_vec) + 1e-9)
+            top_idx = np.argsort(-sims)[:top_k]
+
+            return df.iloc[top_idx].assign(similarity=sims[top_idx])
+
+        except Exception:
+            pass  # fallback to substring match
+
+    mask = df.apply(
+        lambda row: row.astype(str).str.contains(query, case=False, na=False).any(),
+        axis=1,
+    )
     return df[mask].head(top_k)
