@@ -418,7 +418,7 @@ def semantic_retrieve_rexus(
             return df.iloc[top_idx].assign(similarity=sims[top_idx])
 
         except Exception:
-            pass  # fallback to substring match
+            pass  
 
     mask = df.apply(
         lambda row: row.astype(str).str.contains(query, case=False, na=False).any(),
