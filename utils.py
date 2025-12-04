@@ -5,6 +5,9 @@ from typing import Optional, Tuple, List
 import numpy as np
 import pandas as pd
 
+
+# ---------- Generic Helpers ----------
+
 def safe_float(x, default=float("nan")):
     """Safely convert a value to float, stripping commas and percent signs."""
     try:
@@ -43,6 +46,9 @@ def load_csv_safe(path: str) -> Optional[pd.DataFrame]:
     df.columns = [str(c).strip() for c in df.columns]
     return df
 
+
+# ---------- Geocoding / Demo Coordinates ----------
+
 def geocode_city_state(city: str, state: str) -> Tuple[Optional[float], Optional[float]]:
     demo_coords = {
         ("Seattle", "WA"): (47.6062, -122.3321),
@@ -55,6 +61,9 @@ def geocode_city_state(city: str, state: str) -> Tuple[Optional[float], Optional
         ("Denver", "CO"): (39.7392, -104.9903),
     }
     return demo_coords.get((city, state), (None, None))
+
+
+# ---------- Safety (Synthetic) ----------
 
 def get_safety_data(city: str, state: str = "") -> dict:
     city_key = (city or "").strip().lower()
@@ -108,6 +117,9 @@ def get_safety_data(city: str, state: str = "") -> dict:
         "neighborhood_watch": f"{int(total_safety/2)} groups",
     }
 
+
+# ---------- Quality of Life (Synthetic) ----------
+
 def get_quality_data(lat: float, lon: float) -> dict:
     try:
         distance_from_coast = abs((lon + 100) / 20)
@@ -134,6 +146,9 @@ def get_quality_data(lat: float, lon: float) -> dict:
     except Exception:
         return {}
 
+
+# ---------- Education (Synthetic, city-specific) ----------
+
 def get_education(city: str) -> dict:
     """
     Return synthetic but city-specific education info.
@@ -158,7 +173,6 @@ def get_education(city: str) -> dict:
     }
 
     default_profile = {"rank": 20, "rating": 7.8, "total": 35}
-
     profile = CITY_EDU_PROFILE.get(city_key, default_profile)
 
     return {
@@ -168,6 +182,21 @@ def get_education(city: str) -> dict:
         "school_rating": f"{profile['rating']:.1f}/10",
         "total_schools": str(profile["total"]),
     }
+
+
+# ---------- Price Time-Series Handling ----------
+
+MONTH_COL_REGEX = re.compile(
+    r"^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[\s\-]?\d{2,4}$",
+    re.IGNORECASE,
+)
+
+NON_TIME_COLS = {
+    "city", "city name", "city_name", "city code", "citycode",
+    "state", "st", "state_code",
+    "region", "zip", "zipcode",
+    "metro", "county", "population rank",
+}
 
 
 def _identify_date_columns(df: pd.DataFrame) -> List[str]:
@@ -244,6 +273,7 @@ def get_price_data_for_city(city: str, state: str, df_price: Optional[pd.DataFra
 
     lower_map = {c.lower(): c for c in df.columns}
 
+    # Prefer exact 'City' / 'City Name'
     city_col = None
     for name in ("city", "city name", "city_name"):
         if name in lower_map:
@@ -253,6 +283,7 @@ def get_price_data_for_city(city: str, state: str, df_price: Optional[pd.DataFra
         city_candidates = [c for c in df.columns if "city" in c.lower()]
         city_col = city_candidates[0] if city_candidates else None
 
+    # Prefer 'State' / 'ST'
     state_col = None
     for name in ("state", "st", "state_code"):
         if name in lower_map:
@@ -288,6 +319,7 @@ def get_price_data_for_city(city: str, state: str, df_price: Optional[pd.DataFra
         mask_city = False
         mask_state = False
 
+    # Exact city+state
     if isinstance(mask_city, (pd.Series, np.ndarray)) and isinstance(mask_state, (pd.Series, np.ndarray)):
         matches = df[mask_city & mask_state]
     else:
@@ -297,6 +329,7 @@ def get_price_data_for_city(city: str, state: str, df_price: Optional[pd.DataFra
     if matches.empty and isinstance(mask_city, (pd.Series, np.ndarray)):
         matches = df[mask_city]
 
+    # Fallback: substring city match
     if matches.empty and city and city_col:
         try:
             matches = df[
@@ -358,6 +391,9 @@ def get_price_data_for_city(city: str, state: str, df_price: Optional[pd.DataFra
         "median_price": fmt(median_val),
         "price_timeseries": ts,
     }
+
+
+# ---------- Real Estate (REXUS) ----------
 
 def get_real_estate_data(city: str, state: str, df_rexus: Optional[pd.DataFrame]) -> dict:
     """
@@ -430,6 +466,9 @@ def get_real_estate_data(city: str, state: str, df_rexus: Optional[pd.DataFrame]
         return df.iloc[0].to_dict()
 
     return matches.iloc[0].to_dict()
+
+
+# ---------- Semantic Search over REXUS ----------
 
 def semantic_retrieve_rexus(
     query: str,
