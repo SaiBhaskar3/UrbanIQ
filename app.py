@@ -1,13 +1,13 @@
-import streamlit as st
+import traceback
 from datetime import datetime
+
 import pandas as pd
 import plotly.express as px
-import traceback
-import os
+import streamlit as st
 
 from utils import (
     sanitize_location_text,
-    load_csv_safe,
+    load_csv_safe,  # not used directly but ok to keep
     geocode_city_state,
     get_safety_data,
     get_quality_data,
@@ -23,106 +23,198 @@ st.set_page_config(
     layout="wide",
 )
 
-st.markdown("<h1 style='text-align:center;'>🏘️ UrbanIQ – US Neighborhood Comparison</h1>", unsafe_allow_html=True)
-st.markdown("<p style='text-align:center;color:#6b7280;'>Using provided datasets: <code>data_gov_bldg_rexus.csv</code> and <code>price.csv</code></p>", unsafe_allow_html=True)
+st.markdown(
+    """
+<style>
+.section-title { color:#111827; font-size:1.3rem; font-weight:700; margin: 1rem 0 0.5rem 0; }
+.metric-item { background-color:#fff; padding:0.75rem; border-radius:6px; border:1px solid #e5e7eb; }
+.card { background: #fff; padding: 12px; border-radius: 8px; border: 1px solid #e5e7eb; }
+</style>
+""",
+    unsafe_allow_html=True,
+)
 
-BASE = os.getcwd()
-rexus_path = os.path.join(BASE, "data_gov_bldg_rexus.csv")
-price_path = os.path.join(BASE, "price.csv")
+@st.cache_data(show_spinner=False)
+def load_rexus():
+    return load_csv_safe("data_gov_bldg_rexus.csv")
 
-df_rexus = load_csv_safe(rexus_path)
-df_price = load_csv_safe(price_path)
 
-if df_rexus is None or df_rexus.empty:
-    st.warning("REXUS building dataset not found or empty. Upload 'data_gov_bldg_rexus.csv' to the app root.")
-if df_price is None or df_price.empty:
-    st.warning("Price dataset not found or empty. Upload 'price.csv' to the app root.")
+@st.cache_data(show_spinner=False)
+def load_price():
+    return load_csv_safe("price.csv")
 
-# ------------------------------
-# SIDEBAR INPUT
-# ------------------------------
-st.sidebar.title("Compare Locations")
-loc1 = st.sidebar.text_input("Location A (City, ST)", value="Seattle, WA")
-loc2 = st.sidebar.text_input("Location B (City, ST)", value="Portland, OR")
 
-if st.sidebar.button("Compare"):
+df_rexus = load_rexus()
+df_price = load_price()
+
+try:
+    from sentence_transformers import SentenceTransformer
+    MODEL_AVAILABLE = True
+except Exception:
+    MODEL_AVAILABLE = False
+
+
+@st.cache_resource(show_spinner=False)
+def load_embedding_model():
+    if not MODEL_AVAILABLE:
+        return None
+    try:
+        return SentenceTransformer("all-MiniLM-L6-v2")
+    except Exception:
+        return None
+
+
+@st.cache_resource(show_spinner=False)
+def build_rexus_embeddings():
+    """
+    Build embeddings for the REXUS dataset using the cached model and data.
+    No unhashable arguments are passed to keep Streamlit caching happy.
+    """
+    df = load_rexus()
+    model = load_embedding_model()
+
+    if model is None or df is None or df.empty:
+        return None
 
     try:
-        # ------------------------------
-        # CLEAN INPUT
-        # ------------------------------
-        city1, state1 = sanitize_location_text(loc1)
-        city2, state2 = sanitize_location_text(loc2)
+        addr = df.get("Bldg Address1", "").fillna("")
+        city = df.get("Bldg City", "").fillna("")
+        state = df.get("Bldg State", "").fillna("")
 
-        # ------------------------------
-        # GEOCODE (correct signature)
-        # ------------------------------
-        lat1, lon1 = geocode_city_state(city1, state1)
-        lat2, lon2 = geocode_city_state(city2, state2)
+        combined = (addr + " " + city + " " + state).astype(str).tolist()
+        return model.encode(combined, show_progress_bar=False)
+    except Exception:
+        return None
 
-        # ------------------------------
-        # SAFETY (correct signature)
-        # ------------------------------
-        safety1 = get_safety_data(city1, state1)
-        safety2 = get_safety_data(city2, state2)
 
-        # ------------------------------
-        # QUALITY OF LIFE (needs only lat/lon)
-        # ------------------------------
-        quality1 = get_quality_data(lat1, lon1)
-        quality2 = get_quality_data(lat2, lon2)
+emb_model = load_embedding_model()
+rexus_embeddings = build_rexus_embeddings()
 
-        # ------------------------------
-        # EDUCATION (your utils only takes 1 arg)
-        # ------------------------------
-        edu1 = get_education(city1)
-        edu2 = get_education(city2)
+st.sidebar.title("UrbanIQ Navigation")
+page = st.sidebar.selectbox("Go to:", ["Compare", "Data Explorer"])
 
-        # ------------------------------
-        # PRICE DATA (correct parameters)
-        # ------------------------------
-        price1 = get_price_data_for_city(city1, state1, df_price)
-        price2 = get_price_data_for_city(city2, state2, df_price)
+with st.sidebar.form("location_form", clear_on_submit=False):
+    loc1 = st.text_input("Location A", value="Seattle, WA")
+    loc2 = st.text_input("Location B", value="Portland, OR")
+    submit_locations = st.form_submit_button("Update")
 
-        # ------------------------------
-        # REAL ESTATE DATA (correct parameters)
-        # ------------------------------
-        real1 = get_real_estate_data(city1, state1, df_rexus)
-        real2 = get_real_estate_data(city2, state2, df_rexus)
+if "data1" not in st.session_state:
+    st.session_state.data1 = None
+if "data2" not in st.session_state:
+    st.session_state.data2 = None
 
-        # Store in session
-        st.session_state["a"] = {
-            "city": city1, "state": state1,
-            "safety": safety1, "quality": quality1,
-            "education": edu1, "price": price1,
-            "real": real1, "coords": (lat1, lon1)
-        }
-        st.session_state["b"] = {
-            "city": city2, "state": state2,
-            "safety": safety2, "quality": quality2,
-            "education": edu2, "price": price2,
-            "real": real2, "coords": (lat2, lon2)
-        }
+st.markdown(
+    "<h1 style='text-align:center;'>🏘️ US Neighborhood Comparison (UrbanIQ)</h1>",
+    unsafe_allow_html=True,
+)
+st.markdown(
+    "<p style='text-align:center;color:#6b7280;'>Compare two locations across education, housing, safety and quality-of-life.</p>",
+    unsafe_allow_html=True,
+)
 
-        # ------------------------------
-        # OVERVIEW METRICS
-        # ------------------------------
-        st.subheader("Overview")
+if page == "Compare":
+    st.header("🏙️ UrbanIQ – Compare Two US Locations")
+    left, right = st.columns([1, 3])
 
-        cols = st.columns(3)
-        cols[0].metric(f"{city1}, {state1} Safety", safety1["crime_index"])
-        cols[1].metric(f"{city1}, {state1} Walkability", quality1.get("walkability", "N/A"))
-        cols[2].metric(f"{city1}, {state1} School Rank", edu1.get("school_rank", "N/A"))
+    with left:
+        st.markdown("### Locations Selected")
+        st.write(f"**A:** {loc1}")
+        st.write(f"**B:** {loc2}")
 
-        colsb = st.columns(3)
-        colsb[0].metric(f"{city2}, {state2} Safety", safety2["crime_index"])
-        colsb[1].metric(f"{city2}, {state2} Walkability", quality2.get("walkability", "N/A"))
-        colsb[2].metric(f"{city2}, {state2} School Rank", edu2.get("school_rank", "N/A"))
+        if st.button("Load & Compare"):
+            try:
+                with st.spinner("Fetching neighborhood insights..."):
+                    city1, state1 = sanitize_location_text(loc1)
+                    city2, state2 = sanitize_location_text(loc2)
 
-        # ------------------------------
-        # PRICE TIMESERIES
-        # ------------------------------
-        st.subheader("City-level Price Time Series (if available)")
+                    real1 = get_real_estate_data(city1, state1, df_rexus)
+                    real2 = get_real_estate_data(city2, state2, df_rexus)
+
+                    safety1 = get_safety_data(city1, state1)
+                    safety2 = get_safety_data(city2, state2)
+
+                    lat1, lon1 = geocode_city_state(city1, state1)
+                    lat2, lon2 = geocode_city_state(city2, state2)
+                    quality1 = get_quality_data(lat1 or 40.0, lon1 or -100.0)
+                    quality2 = get_quality_data(lat2 or 40.0, lon2 or -100.0)
+
+                    edu1 = get_education(city1)
+                    edu2 = get_education(city2)
+
+                    price1 = get_price_data_for_city(city1, state1, df_price)
+                    price2 = get_price_data_for_city(city2, state2, df_price)
+
+                    st.session_state.data1 = {
+                        "real_estate": real1,
+                        "safety": safety1,
+                        "quality": quality1,
+                        "education": edu1,
+                        "price": price1,
+                        "coords": {"lat": lat1, "lon": lon1},
+                        "label": f"{city1}, {state1}".strip(", "),
+                    }
+                    st.session_state.data2 = {
+                        "real_estate": real2,
+                        "safety": safety2,
+                        "quality": quality2,
+                        "education": edu2,
+                        "price": price2,
+                        "coords": {"lat": lat2, "lon": lon2},
+                        "label": f"{city2}, {state2}".strip(", "),
+                    }
+
+                st.success("Comparison Ready!")
+            except Exception as e:
+                st.error("Something went wrong while loading comparison data.")
+                st.exception(e)
+
+    if st.session_state.data1 and st.session_state.data2:
+        st.markdown(
+            f"**Last Updated:** {datetime.now().strftime('%B %d, %Y %I:%M %p')}"
+        )
+
+        st.subheader("🏠 Real Estate & Price Snapshot")
+        colA, colB = st.columns(2)
+
+        def property_card(data: dict, fallback_title: str):
+            re_info = data.get("real_estate", {}) or {}
+            price_info = data.get("price", {}) or {}
+
+            title = data.get("label", fallback_title)
+            st.markdown(f"### {title}")
+            st.markdown("<div class='metric-item'>", unsafe_allow_html=True)
+
+            if re_info:
+                keys_show = [
+                    "Bldg Address1",
+                    "Bldg Status",
+                    "Property Type",
+                    "Bldg ANSI Usable",
+                    "Total Parking Spaces",
+                    "Owned/Leased",
+                    "Construction Date",
+                    "Historical Status",
+                ]
+                for k in keys_show:
+                    if k in re_info:
+                        st.write(f"**{k.replace('_',' ').title()}:** {re_info.get(k, 'N/A')}")
+            else:
+                st.write("**No building registry data available.**")
+
+            latest = price_info.get("latest_price", "No data")
+            median = price_info.get("median_price", "No data")
+            st.markdown("---")
+            st.write("**Latest Price (city-level):**", latest)
+            st.write("**Median Price (city-level):**", median)
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        with colA:
+            property_card(st.session_state.data1, loc1)
+        with colB:
+            property_card(st.session_state.data2, loc2)
+
+        p1 = st.session_state.data1["price"].get("price_timeseries")
+        p2 = st.session_state.data2["price"].get("price_timeseries")
 
         def prepare_ts(data, label):
             if data is None:
@@ -142,98 +234,167 @@ if st.sidebar.button("Compare"):
                 return df
             return pd.DataFrame()
 
-        ts1 = prepare_ts(price1.get("price_timeseries"), f"{city1}, {state1}")
-        ts2 = prepare_ts(price2.get("price_timeseries"), f"{city2}, {state2}")
+        ts_df1 = prepare_ts(p1, st.session_state.data1.get("label", loc1))
+        ts_df2 = prepare_ts(p2, st.session_state.data2.get("label", loc2))
 
-        ts_df = pd.concat([t for t in [ts1, ts2] if not t.empty], axis=1)
+        if not ts_df1.empty and not ts_df2.empty:
+            ts_df = pd.concat([ts_df1, ts_df2], axis=1)
+        elif not ts_df1.empty:
+            ts_df = ts_df1
+        elif not ts_df2.empty:
+            ts_df = ts_df2
+        else:
+            ts_df = pd.DataFrame()
 
         if not ts_df.empty:
             try:
-                ts_df.index = pd.to_datetime(ts_df.index, errors="coerce")
+                idx_parsed = pd.to_datetime(ts_df.index, errors="coerce")
+                if idx_parsed.notna().any():
+                    ts_df = ts_df.set_index(idx_parsed)
                 ts_df = ts_df.sort_index()
             except Exception:
                 pass
 
-            fig = px.line(ts_df, x=ts_df.index, y=ts_df.columns, markers=True)
-            fig.update_layout(xaxis_title="Date", yaxis_title="Price")
-            st.plotly_chart(fig, use_container_width=True)
+            fig_price = px.line(ts_df, x=ts_df.index, y=ts_df.columns, markers=True)
+            fig_price.update_layout(xaxis_title="Date", yaxis_title="Price")
+            st.plotly_chart(fig_price, use_container_width=True)
         else:
-            st.info("No city-level timeseries price data available for these cities.")
+            st.info(
+                "No city-level time series price data available for either location."
+            )
 
-        # ------------------------------
-        # SAFETY BAR CHART
-        # ------------------------------
-        st.subheader("Safety Comparison")
-        safety_df = pd.DataFrame([
-            {"Location": f"{city1}, {state1}", "Score": safety1["crime_index"]},
-            {"Location": f"{city2}, {state2}", "Score": safety2["crime_index"]},
-        ])
-        fig_s = px.bar(safety_df, x="Location", y="Score", text="Score", color="Location")
-        st.plotly_chart(fig_s, use_container_width=True)
+        st.subheader("🚓 Safety Comparison")
+        safety_df = pd.DataFrame(
+            [
+                {
+                    "Location": st.session_state.data1.get("label", loc1),
+                    "Score": st.session_state.data1["safety"]["crime_index"],
+                },
+                {
+                    "Location": st.session_state.data2.get("label", loc2),
+                    "Score": st.session_state.data2["safety"]["crime_index"],
+                },
+            ]
+        )
 
-        # ------------------------------
-        # QUALITY OF LIFE RADAR
-        # ------------------------------
-        st.subheader("Quality of Life Snapshot")
+        fig_safety = px.bar(
+            safety_df,
+            x="Location",
+            y="Score",
+            text="Score",
+            color="Location",
+            labels={"Score": "Safety Score (Higher = Safer)"},
+        )
+        st.plotly_chart(fig_safety, use_container_width=True)
 
-        def make_quality_df(qdict, label):
-            return pd.DataFrame({
-                "Metric": ["Walkability", "Air Quality", "Transit", "Healthcare", "Restaurants"],
-                "Value": [
-                    qdict.get("walkability", 0),
-                    qdict.get("air_quality", 0),
-                    qdict.get("transit", 0),
-                    qdict.get("healthcare", 0),
-                    qdict.get("restaurants", 0),
-                ],
-                "Location": label
-            })
+        col1_tr, col2_tr = st.columns(2)
+        with col1_tr:
+            s1 = st.session_state.data1["safety"]
+            st.markdown(f"**{st.session_state.data1.get('label', loc1)} Trend:** {s1['crime_trend']}")
+            st.markdown(f"Severity: {s1['severity']}")
+        with col2_tr:
+            s2 = st.session_state.data2["safety"]
+            st.markdown(f"**{st.session_state.data2.get('label', loc2)} Trend:** {s2['crime_trend']}")
+            st.markdown(f"Severity: {s2['severity']}")
 
-        qdf = pd.concat([
-            make_quality_df(quality1, f"{city1}, {state1}"),
-            make_quality_df(quality2, f"{city2}, {state2}")
-        ])
-        fig_q = px.line_polar(qdf, r="Value", theta="Metric", color="Location", line_close=True)
-        st.plotly_chart(fig_q, use_container_width=True)
+        st.subheader("🌿 Quality of Life Radar Chart")
 
-        # ------------------------------
-        # EDUCATION + REAL ESTATE DETAILS
-        # ------------------------------
-        st.subheader("Education & Real Estate Details")
-        left, right = st.columns(2)
+        def quality_df(row, label):
+            q = row.get("quality", {}) or {}
 
-        with left:
-            st.markdown(f"### {city1}, {state1}")
-            st.json(edu1)
-            st.write("Real estate sample:")
-            st.json(real1)
-            st.write("Price summary:")
-            st.json(price1)
+            def to_num(x):
+                if isinstance(x, str) and "/" in x:
+                    try:
+                        return float(x.split("/")[0])
+                    except Exception:
+                        return 0.0
+                try:
+                    return float(x)
+                except Exception:
+                    return 0.0
 
-        with right:
-            st.markdown(f"### {city2}, {state2}")
-            st.json(edu2)
-            st.write("Real estate sample:")
-            st.json(real2)
-            st.write("Price summary:")
-            st.json(price2)
+            return pd.DataFrame(
+                {
+                    "Metric": [
+                        "Walkability",
+                        "Air Quality",
+                        "Transit",
+                        "Healthcare",
+                        "Restaurants",
+                    ],
+                    "Value": [
+                        to_num(q.get("walkability")),
+                        to_num(q.get("air_quality")),
+                        to_num(q.get("transit")),
+                        to_num(q.get("healthcare")),
+                        to_num(q.get("restaurants")),
+                    ],
+                    "Location": label,
+                }
+            )
 
-        # ------------------------------
-        # BUILDING SEARCH
-        # ------------------------------
-        st.subheader("Building Search (semantic / substring)")
-        query = st.text_input("Search buildings (title, address, etc.)")
-        k = st.slider("Top K", 1, 10, 5)
+        radar_data = pd.concat(
+            [
+                quality_df(
+                    st.session_state.data1,
+                    st.session_state.data1.get("label", loc1),
+                ),
+                quality_df(
+                    st.session_state.data2,
+                    st.session_state.data2.get("label", loc2),
+                ),
+            ]
+        )
+        fig_radar = px.line_polar(
+            radar_data,
+            r="Value",
+            theta="Metric",
+            color="Location",
+            line_close=True,
+        )
+        st.plotly_chart(fig_radar, use_container_width=True)
+
+        st.subheader("📚 Education & Schools")
+        col_e1, col_e2 = st.columns(2)
+        with col_e1:
+            ed = st.session_state.data1.get("education", {}) or {}
+            st.markdown(f"**{st.session_state.data1.get('label', loc1)}**")
+            for k, v in ed.items():
+                label = k.replace("_", " ").title()
+                st.write(f"{label}: {v}")
+        with col_e2:
+            ed = st.session_state.data2.get("education", {}) or {}
+            st.markdown(f"**{st.session_state.data2.get('label', loc2)}**")
+            for k, v in ed.items():
+                label = k.replace("_", " ").title()
+                st.write(f"{label}: {v}")
+
+elif page == "Data Explorer":
+    st.header("🔎 Data Explorer")
+
+    if df_rexus is not None and not df_rexus.empty:
+        st.subheader("Building Dataset (Sample)")
+        st.dataframe(df_rexus.head(50))
+
+        query = st.text_input("Search Buildings (Semantic / Text)")
+        k = st.slider("Top K", 1, 10, 3)
 
         if st.button("Search Buildings"):
-            results = semantic_retrieve_rexus(query, df_rexus, embeddings=None, model=None, top_k=k)
-            if results is None or results.empty:
-                st.info("No results found or dataset/model not available.")
-            else:
-                st.dataframe(results)
+            try:
+                results = semantic_retrieve_rexus(
+                    query, df_rexus, rexus_embeddings, emb_model, top_k=k
+                )
+                if results is None or results.empty:
+                    st.info("No results (or embeddings/model not available).")
+                else:
+                    st.dataframe(results)
+            except Exception as e:
+                st.error("Error while searching buildings.")
+                st.exception(e)
+    else:
+        st.info(
+            "Upload 'data_gov_bldg_rexus.csv' in app root to explore building data."
+        )
 
-        st.success("Comparison completed.")
-
-    except Exception as e:
-        st.error("Error while computing comparison.")
-        st.exception(e)
+st.markdown("---")
+st.caption("UrbanIQ — Data-driven neighborhood insights.")
