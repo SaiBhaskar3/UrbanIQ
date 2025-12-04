@@ -135,30 +135,39 @@ def get_quality_data(lat: float, lon: float) -> dict:
         return {}
 
 def get_education(city: str) -> dict:
-    """Return simple synthetic education info for a city, with clean formatting."""
+    """
+    Return synthetic but city-specific education info.
+    Different cities get different rank, rating, and total schools.
+    """
     if not city:
         city_clean = "Local"
+        city_key = ""
     else:
         city_clean = city.strip().title()
+        city_key = city.strip().lower()
+
+    CITY_EDU_PROFILE = {
+        "seattle":      {"rank": 8,  "rating": 8.7, "total": 52},
+        "portland":     {"rank": 15, "rating": 8.1, "total": 48},
+        "boston":       {"rank": 5,  "rating": 9.0, "total": 60},
+        "new york":     {"rank": 18, "rating": 8.0, "total": 120},
+        "san francisco":{"rank": 7,  "rating": 8.8, "total": 40},
+        "chicago":      {"rank": 22, "rating": 7.6, "total": 95},
+        "austin":       {"rank": 12, "rating": 8.3, "total": 55},
+        "denver":       {"rank": 14, "rating": 8.2, "total": 42},
+    }
+
+    default_profile = {"rank": 20, "rating": 7.8, "total": 35}
+
+    profile = CITY_EDU_PROFILE.get(city_key, default_profile)
 
     return {
         "district_name": f"{city_clean} School District",
         "highest_ranked_school": f"{city_clean} High School",
-        "school_rank": "#12",
-        "school_rating": "8.2/10",
-        "total_schools": "35",
+        "school_rank": f"#{profile['rank']}",
+        "school_rating": f"{profile['rating']:.1f}/10",
+        "total_schools": str(profile["total"]),
     }
-
-MONTH_COL_REGEX = re.compile(
-    r"^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[\s\-]?\d{2,4}$",
-    re.IGNORECASE,
-)
-
-NON_TIME_COLS = {
-    "city", "city name", "city_name", "city code", "citycode",
-    "state", "st", "state_code", "region", "zip", "zipcode",
-    "metro", "county", "population rank"
-}
 
 
 def _identify_date_columns(df: pd.DataFrame) -> List[str]:
