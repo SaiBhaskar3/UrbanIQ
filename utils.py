@@ -51,6 +51,7 @@ def geocode_city_state(city: str, state: str) -> Tuple[Optional[float], Optional
     }
     return demo_coords.get((city, state), (None, None))
 
+
 def get_safety_data(city: str, state: str = "") -> dict:
     city_key = (city or "").strip().lower()
     BASE_SAFE_SCORE = 72
@@ -140,7 +141,7 @@ def get_education(city: str) -> dict:
         "school_rating": "8.2/10",
         "total_schools": "35",
     }
-
+    
 def _identify_date_columns(df: pd.DataFrame) -> List[str]:
     date_cols = []
     for c in df.columns:
@@ -276,6 +277,7 @@ def get_price_data_for_city(city: str, state: str, df_price: Optional[pd.DataFra
         "price_timeseries": ts,
     }
 
+
 def get_real_estate_data(city: str, state: str, df_rexus: Optional[pd.DataFrame]) -> dict:
     if df_rexus is None or df_rexus.empty:
         return {}
@@ -363,6 +365,7 @@ def get_school_stats(city: str, state: str, df_school: Optional[pd.DataFrame]) -
 
     return {"school_count": int(school_count), "best_rank": int(best_rank) if pd.notna(best_rank) else "No data"}
 
+
 def semantic_retrieve_rexus(
     query: str,
     df: Optional[pd.DataFrame],
@@ -373,6 +376,7 @@ def semantic_retrieve_rexus(
     if df is None or df.empty or not query:
         return pd.DataFrame()
 
+    # Use embeddings + model if both are provided
     if embeddings is not None and model is not None:
         try:
             q_vec = model.encode([query])[0]
@@ -384,6 +388,7 @@ def semantic_retrieve_rexus(
             out["similarity"] = sims[top_idx]
             return out
         except Exception:
+            # fall back to substring match below
             pass
 
     mask = df.apply(lambda row: row.astype(str).str.contains(query, case=False, na=False).any(), axis=1)
