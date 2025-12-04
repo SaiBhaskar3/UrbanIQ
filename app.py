@@ -32,6 +32,7 @@ st.markdown(
 """,
     unsafe_allow_html=True,
 )
+
 @st.cache_data(show_spinner=False)
 def load_rexus():
     return load_csv_safe("data_gov_bldg_rexus.csv")
@@ -184,6 +185,7 @@ if page == "Compare":
             else:
                 st.write("**No building registry data available.**")
 
+            # Price display (from utils)
             st.markdown("---")
             latest = price_info.get("latest_price", "No data")
             median = price_info.get("median_price", "No data")
@@ -200,6 +202,8 @@ if page == "Compare":
             property_card(st.session_state.data1, loc1)
         with colB:
             property_card(st.session_state.data2, loc2)
+
+        # price timeseries plotting (utils returns 'price_timeseries')
         p1 = st.session_state.data1["price"].get("price_timeseries")
         p2 = st.session_state.data2["price"].get("price_timeseries")
 
@@ -247,6 +251,7 @@ if page == "Compare":
         else:
             st.info("No city-level time series price data available for either location.")
 
+        # Safety chart
         st.subheader("🚓 Safety Comparison")
         safety_df = pd.DataFrame(
             [
@@ -267,6 +272,7 @@ if page == "Compare":
             st.markdown(f"**{loc2} Trend:** {s2['crime_trend']}")
             st.markdown(f"Severity: {s2['severity']}")
 
+        # Quality radar
         st.subheader("🌿 Quality of Life Radar Chart")
         def quality_df(row, label):
             q = row.get("quality", {}) or {}
@@ -295,6 +301,7 @@ if page == "Compare":
         fig_radar = px.line_polar(radar_data, r="Value", theta="Metric", color="Location", line_close=True)
         st.plotly_chart(fig_radar, use_container_width=True)
 
+        # Education & schools textual
         st.subheader("📚 Education & Schools")
         col_e1, col_e2 = st.columns(2)
         with col_e1:
@@ -336,4 +343,3 @@ elif page == "Data Explorer":
                 st.exception(e)
     else:
         st.info("Upload 'data_gov_bldg_rexus.csv' in app root to explore building data.")
-
